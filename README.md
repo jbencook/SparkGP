@@ -1,5 +1,5 @@
 # SparkGP
-## Using a Gaussian Process over large data to predict weather data at county centroids.
+## Using a Gaussian Process over large data to predict weather at county centroids.
 
 To build:
 
