@@ -1,4 +1,4 @@
-/* SimpleApp.scala */
+/* SparkGP.scala */
 import java.nio.file.Paths
 
 import org.apache.spark.SparkContext
