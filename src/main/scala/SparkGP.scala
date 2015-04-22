@@ -6,6 +6,11 @@ import org.apache.spark.SparkContext._
 import org.apache.spark.SparkConf
 import org.apache.spark.mllib.linalg._
 import org.apache.spark.mllib.linalg.distributed._
+import org.apache.spark.mllib.clustering.VectorWithNorm
+import org.apache.spark.mllib.random.RandomRDDs._
+
+import math._
+import util.Random.nextGaussian
 
 object Functions {
   def getType(s: String): String = { s.substring(12, 16) }
@@ -22,6 +27,13 @@ object Functions {
     val elements = s.split("\\s+").slice(0, 4)
     (elements(0), (elements(1).toDouble, elements(2).toDouble))
   }
+  def distance(xs: Array[Double], ys: Array[Double]) = {
+    sqrt((xs zip ys).map { case (x,y) => pow(y - x, 2) }.sum)
+  }
+  def covariance(i: IndexedRow, j: IndexedRow): MatrixEntry = {
+    val d = distance(i.vector.toArray, j.vector.toArray)
+    MatrixEntry(i.index, j.index, d)
+  }
 }
 
 object SparkGP {
@@ -37,6 +49,7 @@ object SparkGP {
     val year = date(0)
     val month = date(1)
     val day = date(2).toInt
+    val r = 100
 
     val conf = new SparkConf()
     val sc = new SparkContext(conf)
@@ -62,14 +75,27 @@ object SparkGP {
       .map(row => (IndexedRow(row._2, row._1._1), IndexedRow(row._2, row._1._2)))
       .cache()
 
+    val N = rows.count.toInt
+
     // Initialize IndexedRowMatrix's
     val y = new IndexedRowMatrix(rows.map(_._1))
     val X = new IndexedRowMatrix(rows.map(_._2))
 
     // Build covariance matrix K
-    val K = rows.cartesian(rows)
+    val K = new CoordinateMatrix(
+      rows.cartesian(rows)
+        .map(pair => Functions.covariance(pair._1._2, pair._2._2))
+    )
 
-    println("%s".format(K.first()))
+    //O = np.random.normal(0, 1, size=(N, r)) / np.sqrt(r)
+    val O = Matrices.dense(
+      N, r,
+      Array.range(0, N * r).map(_ => nextGaussian / r)
+    )
+
+    val KO = K.toIndexedRowMatrix.multiply(O)
+
+    println("%s".format(KO))
 
   }
 }
