@@ -1,5 +1,7 @@
 /* SparkGP.scala */
 import java.nio.file.Paths
+import breeze.linalg.{DenseMatrix => DM}
+import breeze.linalg.cholesky
 
 import org.apache.spark.SparkContext
 import org.apache.spark.SparkContext._
@@ -32,7 +34,7 @@ object Functions {
   }
   def covariance(i: IndexedRow, j: IndexedRow): MatrixEntry = {
     val d = distance(i.vector.toArray, j.vector.toArray)
-    MatrixEntry(i.index, j.index, d)
+    MatrixEntry(i.index, j.index, exp(-d))
   }
 }
 
@@ -85,17 +87,39 @@ object SparkGP {
     val K = new CoordinateMatrix(
       rows.cartesian(rows)
         .map(pair => Functions.covariance(pair._1._2, pair._2._2))
-    )
+    ).toBlockMatrix
 
-    //O = np.random.normal(0, 1, size=(N, r)) / np.sqrt(r)
-    val O = Matrices.dense(
-      N, r,
-      Array.range(0, N * r).map(_ => nextGaussian / r)
-    )
+    // # Step 1: Form the matrix product C \Omega
+    // O = np.random.normal(0, 1, size=(N, r)) / np.sqrt(r)
+    // KO = K.dot(O)
+//    val O = Matrices.dense(
+//      N, r,
+//      Array.range(0, N * r).map(_ => nextGaussian / r)
+//    )
 
-    val KO = K.toIndexedRowMatrix.multiply(O)
+    val O = new IndexedRowMatrix(
+      normalVectorRDD(sc, N.toLong, r, 20, 101L)
+        .zipWithIndex
+        .map(row => IndexedRow(row._2, row._1))
+    ).toBlockMatrix
+    val KO = K.multiply(O)
 
-    println("%s".format(KO))
+    // # Step 2: Compute \Phi^T, the left factor of the rank-m spectral projection of the small matrix C \Omega.
+    // U, _, _ = np.linalg.svd(KO, full_matrices=False)
+    // phi = U.T
+    val svd = KO.toIndexedRowMatrix.computeSVD(r, computeU = true)
+    val U = svd.U
+    val phi = U.toBlockMatrix.transpose
+
+    // # Step 3: C_1 = \Phi C \Phi^T
+    // C_1 = phi.dot(K).dot(phi.T)
+    val C_1 = phi.multiply(K).multiply(phi.transpose)
+
+    // # Step 4:  Perform a Cholesky factorization of C1 = B B^T
+    // B = np.linalg.cholesky(C_1)
+    val B = cholesky(breeze.linalg.DenseMatrix(C_1.toLocalMatrix.toArray))
+
+    println("%s".format(t))
 
   }
 }
